@@ -43,13 +43,12 @@ fs.readFile("common/database/ops_bot.maFile", (err, data) => {
     password: mafile.account_password,
     twoFactorCode: SteamTotp.generateAuthCode(mafile.shared_secret)
   }, function(err, sessionID, cookies, steamguard) {
-      console.log("emitting");
       emitter.emit("logged");
     })
 })
 
 function sell(inventory) {
-  let itemPrice, itemName;
+  let itemName, assetid;
   let prices = [];
   let itemids = [];
   for (let i = 0; i < 1; i++) {
@@ -62,7 +61,6 @@ function sell(inventory) {
 
 function put(itemids, prices) {
   [itemids, prices] = [itemids.join(","), prices.join(",")];
-  console.log("putting")
   request({
     uri: "https://bitskins.com/api/v1/list_item_for_sale",
     qs: {
@@ -74,10 +72,37 @@ function put(itemids, prices) {
     }
   }, function(error, response, body)  {
       console.log(body);
-      // community.acceptConfirmationForObject();
+      let response = response.toJSON();
+      let botid = response["data"]["bot_info"]["uid"];
+      // find offer by token
+      // community.acceptOffer();
       process.exit();
     }
   )}
+
+function acceptOffer(trade_offer_id, partner, callback) {
+  let params = {
+    'sessionid': community.getSessionID(),
+    'tradeofferid': trade_offer_id,
+    'serverid': '1',
+    'partner': partner,
+    'captcha': ''
+	}
+
+	community.httpRequest({
+		"uri": "http://steamcommunity.com/tradeoffer/" + trade_offer_id + "/accept",
+		"qs": params,
+		"headers": {
+			"Referer": "http://steamcommunity.com/tradeoffer/" + trade_offer_id
+		}
+	}, function(err, response, body) {
+		console.log(body);
+		community.acceptConfirmationForObject("Y6uDbFkE92y9rcYBRLqNK9+2ax0=",
+			trade_offer_id, (err) => console.log(err)
+			// callback()
+		)}
+	);
+};
 
 // function sortPriceList() {
 //   let priceListSorted = {};
@@ -100,4 +125,4 @@ function put(itemids, prices) {
 //   }
 
 generateCode();
-setInterval(generateCode, 28000);
+// setInterval(generateCode, 28000);
