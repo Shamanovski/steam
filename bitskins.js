@@ -12,7 +12,6 @@ const community = new SteamCommunity();
 var totp = require('notp').totp;
 var base32 = require('thirty-two');
 var request = require('request');
-let emitter = new EventEmitter();
 let manager = new TradeOfferManager();
 let apiKey = "74315789-5f2a-4d84-8a47-cd362ee51c8b";
 let secret = "BHZIQUFOTQVX7BLK";
@@ -21,45 +20,67 @@ let pricelist = {
   "Twitch Prime Balaclava": "",
   "Mann Co. Supply Crate Key": "",
   "Gamma 2 Case Key": 2.1
-}
+};
 
 // print out a code that's valid right now
 function generateCode() {
   code = totp.gen(base32.decode(secret));
 }
 
-community.getUserInventoryContents("76561198177211015", "730", "2", true, "english", (err, inventory) => {
-  let item;
-  let result = [];
-  for (let i = 0; i < inventory.length; i++) {
-    item = inventory[i];
-    if (item.tradable) {
-      result.push([item.market_hash_name, item.assetid]);
-    }
-  }
-  emitter.on("logged", sell.bind(null, result));
-});
+// emitter.on("inventoryReceived", (result) => sell(result));
+//
+// emitter.on("offers_received", function(received, botid) {
+//   let regexp;
+//   for (let offer of received) {
+//     regexp = new RegExp(`BitSkins Trade Token: ${token}`, "i");
+//     console.log(offer.message.match(regexp));
+//     if (offer.mesasage.match(regexp)[1] == token) {
+//       community.acceptOffer(offer.id, botid, function(err, body) {
+//         console.log(body);
+//         process.exit();
+//       });
+//       break;
+//     }
+//   }
+// });
 
-fs.readFile("common/database/ops_bot.maFile", (err, data) => {
-  const mafile = JSON.parse(data);
-  community.login({
-    accountName: mafile.account_name,
-    password: mafile.account_password,
-    twoFactorCode: SteamTotp.generateAuthCode(mafile.shared_secret)
-  }, function(err, sessionID, cookies, steamguard) {
-      emitter.emit("logged");
 
-      manager.setCookies(cookies, (err) => {
-        if (err) {
-          throw new Error(err);
+let promises = [
+  new Promise((resolve, reject) => {
+    community.getUserInventoryContents("76561198177211015", "730", "2", true, "english", (err, inventory) => {
+    let item;
+    let result = [];
+    for (let i = 0; i < inventory.length; i++) {
+      item = inventory[i];
+      if (item.tradable) {
+        result.push([item.market_hash_name, item.assetid]);
+        resolve(result);
         }
-        manager.getOffers(null, null, function(err, sent, received) {
+      }
+    })
+  }),
+
+  new Promise((resolve, reject) => {
+    fs.readFile("common/database/ops_bot.maFile", (err, data) => {
+      const mafile = JSON.parse(data);
+      community.login({
+        accountName: mafile.account_name,
+        password: mafile.account_password,
+        twoFactorCode: SteamTotp.generateAuthCode(mafile.shared_secret)
+      }, function(err, sessionID, cookies, steamguard) {
+
+        manager.setCookies(cookies, (err) => {
           if (err) throw new Error(err);
-          emitter.emit("offers_received", received);
+
+          manager.getOffers(null, null, function(err, sent, received) {
+            if (err) throw new Error(err);
+            resolve(received);
+          });
         });
       });
     });
-});
+  })
+];
 
 function sell(inventory) {
   let itemName, assetid;
@@ -89,24 +110,8 @@ function put(itemids, prices) {
       let botid = response["data"]["bot_info"]["uid"];
       let token = response["data"]["trade_tokens"][0];
       console.log('offer received');
-      emitter.on("offers_received", function(received) {
-        console.log('!')
-        let regexp;
-        for (let offer of received) {
-          regexp = new RegExp(`BitSkins Trade Token: ${token}`, "i");
-          console.log(offer.message.match(regexp));
-          if (offer.mesasage.match(regexp)[1] == token) {
-            community.acceptOffer(offer.id, botid, function(err, body) {
-              console.log(body);
-              process.exit();
-            });
-            break;
-          }
-        }
-      }
-    );
-  }
-);
+    }
+  );
 }
 
 function acceptOffer(trade_offer_id, partner, callback) {
@@ -156,3 +161,8 @@ function acceptOffer(trade_offer_id, partner, callback) {
 
 generateCode();
 // setInterval(generateCode, 28000);
+
+Promise.all(promises)
+  .then(results => {
+    console.log(results);
+  })
