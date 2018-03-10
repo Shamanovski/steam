@@ -27,24 +27,6 @@ function generateCode() {
   code = totp.gen(base32.decode(secret));
 }
 
-// emitter.on("inventoryReceived", (result) => sell(result));
-//
-// emitter.on("offers_received", function(received, botid) {
-//   let regexp;
-//   for (let offer of received) {
-//     regexp = new RegExp(`BitSkins Trade Token: ${token}`, "i");
-//     console.log(offer.message.match(regexp));
-//     if (offer.mesasage.match(regexp)[1] == token) {
-//       community.acceptOffer(offer.id, botid, function(err, body) {
-//         console.log(body);
-//         process.exit();
-//       });
-//       break;
-//     }
-//   }
-// });
-
-
 let promises = [
   new Promise((resolve, reject) => {
     community.getUserInventoryContents("76561198177211015", "730", "2", true, "english", (err, inventory) => {
@@ -81,38 +63,6 @@ let promises = [
     });
   })
 ];
-
-function sell(inventory) {
-  let itemName, assetid;
-  let prices = [];
-  let itemids = [];
-  for (let i = 0; i < 1; i++) {
-    [itemName, assetid] = [inventory[i][0], inventory[i][1]];
-    prices.push(pricelist[itemName]);
-    itemids.push(assetid);
-  }
-  put(itemids, prices);
-}
-
-function put(itemids, prices) {
-  [itemids, prices] = [itemids.join(","), prices.join(",")];
-  request({
-    uri: "https://bitskins.com/api/v1/list_item_for_sale",
-    qs: {
-      api_key: apiKey,
-      code: code,
-      item_ids: itemids,
-      prices: prices,
-      app_id: "730"
-    }
-  }, function(error, response, body) {
-      response = JSON.parse(response.body);
-      let botid = response["data"]["bot_info"]["uid"];
-      let token = response["data"]["trade_tokens"][0];
-      console.log('offer received');
-    }
-  );
-}
 
 function acceptOffer(trade_offer_id, partner, callback) {
   let params = {
@@ -163,6 +113,49 @@ generateCode();
 // setInterval(generateCode, 28000);
 
 Promise.all(promises)
+
   .then(results => {
-    console.log(results);
+    let [inventory, offers] = results;
+    return new Promise((resolve, reject) => {
+      let itemName, assetid;
+      let prices = [];
+      let itemids = [];
+      for (let i = 0; i < 1; i++) {
+        [itemName, assetid] = [inventory[i][0], inventory[i][1]];
+        prices.push(pricelist[itemName]);
+        itemids.push(assetid);
+      }
+      [itemids, prices] = [itemids.join(","), prices.join(",")];
+      request({
+        uri: "https://bitskins.com/api/v1/list_item_for_sale",
+        qs: {
+          api_key: apiKey,
+          code: code,
+          item_ids: itemids,
+          prices: prices,
+          app_id: "730"
+        }
+      }, function(error, response, body) {
+          response = JSON.parse(response.body);
+          let botid = response["data"]["bot_info"]["uid"];
+          let token = response["data"]["trade_tokens"][0];
+          resolve({"botid": botid, "token": token, "offers": offers});
+        }
+      );
+    });
+  })
+
+  .then(results => {
+    let regexp;
+    for (let offer of results.offers) {
+      regexp = new RegExp(`BitSkins Trade Token: ${results.token}`, "i");
+      console.log(offer.message.match(regexp));
+      if (offer.message.match(regexp)[1] == results.token) {
+        community.acceptOffer(offer.id, results.botid, function(err, body) {
+          console.log(body);
+          process.exit();
+        });
+        break;
+      }
+    }
   })
