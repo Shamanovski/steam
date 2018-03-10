@@ -53,11 +53,7 @@ let promises = [
 
         manager.setCookies(cookies, (err) => {
           if (err) throw new Error(err);
-
-          manager.getOffers(null, null, function(err, sent, received) {
-            if (err) throw new Error(err);
-            resolve(received);
-          });
+          resolve();
         });
       });
     });
@@ -115,7 +111,7 @@ generateCode();
 Promise.all(promises)
 
   .then(results => {
-    let [inventory, offers] = results;
+    let inventory = results[0];
     return new Promise((resolve, reject) => {
       let itemName, assetid;
       let prices = [];
@@ -139,19 +135,25 @@ Promise.all(promises)
           response = JSON.parse(response.body);
           let botid = response["data"]["bot_info"]["uid"];
           let token = response["data"]["trade_tokens"][0];
-          resolve({"botid": botid, "token": token, "offers": offers});
-        }
-      );
-    });
+          setTimeout(() => {
+            manager.getOffers(null, null, function(err, sent, received) {
+              if (err) throw new Error(err);
+              resolve({"botid": botid, "token": token, "offers": received});
+          });
+        }, 3000);
+      });
+    })
   })
 
   .then(results => {
-    let regexp;
+    console.log(results.token);
+    let match;
+    let regexp = new RegExp(`BitSkins Trade Token: (${results.token}),.+`, "i");
     for (let offer of results.offers) {
-      regexp = new RegExp(`BitSkins Trade Token: ${results.token}`, "i");
-      console.log(offer.message.match(regexp));
-      if (offer.message.match(regexp)[1] == results.token) {
-        community.acceptOffer(offer.id, results.botid, function(err, body) {
+      match = offer.message.match(regexp);
+      console.log(match)
+      if (match) {
+        acceptOffer(offer.id, results.botid, function(err, body) {
           console.log(body);
           process.exit();
         });
@@ -159,3 +161,5 @@ Promise.all(promises)
       }
     }
   })
+
+  .catch(error => console.log(error))
