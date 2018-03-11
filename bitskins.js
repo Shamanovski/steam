@@ -19,12 +19,39 @@ let code;
 let pricelist = {
   "Twitch Prime Balaclava": "",
   "Mann Co. Supply Crate Key": "",
-  "Gamma 2 Case Key": 2.1
+  "Gamma 2 Case Key": 2.05
 };
 
 // print out a code that's valid right now
 function generateCode() {
   code = totp.gen(base32.decode(secret));
+}
+
+function listItems(itemsids, prices) {
+
+  return new Promise((resolve, reject) => {
+    request({
+      uri: "https://bitskins.com/api/v1/list_item_for_sale",
+      qs: {
+        api_key: apiKey,
+        code: code,
+        item_ids: itemids,
+        prices: prices,
+        app_id: "730"
+      }
+    }, function(error, response, body) {
+        response = JSON.parse(response.body);
+        try {
+          let botid = response["data"]["bot_info"]["uid"];
+        } catch (err) {
+          console.log(err + '\n');
+          console.log(response);
+          process.exit();
+        }
+        let token = response["data"]["trade_tokens"][0];
+        resolve({"botid": botid, "token": token});
+    });
+  })
 }
 
 let promises = [
@@ -50,63 +77,17 @@ let promises = [
         password: mafile.account_password,
         twoFactorCode: SteamTotp.generateAuthCode(mafile.shared_secret)
       }, function(err, sessionID, cookies, steamguard) {
-
-        manager.setCookies(cookies, (err) => {
-          if (err) throw new Error(err);
-          resolve();
+          manager.setCookies(cookies, (err) => {
+            if (err) throw new Error(err);
+            resolve();
+          });
         });
-      });
     });
   })
 ];
 
-function acceptOffer(trade_offer_id, partner, callback) {
-  let params = {
-    'sessionid': community.getSessionID(),
-    'tradeofferid': "3017446057",
-    'serverid': '1',
-    'partner': "76561198313282396",
-    'captcha': ''
-	}
-
-	community.httpRequest({
-		"uri": "http://steamcommunity.com/tradeoffer/" + trade_offer_id + "/accept",
-		"qs": params,
-		"headers": {
-			"Referer": "http://steamcommunity.com/tradeoffer/" + trade_offer_id
-		}
-	}, function(err, response, body) {
-  		community.acceptConfirmationForObject("Y6uDbFkE92y9rcYBRLqNK9+2ax0=",
-  			trade_offer_id, (err) => {
-          callback(err, body);
-        }
-      );
-    }
-  );
-}
-
-// function sortPriceList() {
-//   let priceListSorted = {};
-//   let item;
-//   for (let i = 0; i < pricelist.length; i++) {
-//     item = pricelist[i];
-//     priceListSorted[item.market_hash_name] = item;
-//   }
-//   return priceListSorted;
-// }
-
-// function getPrices(inventory) {
-//   request({
-//     uri: "https://bitskins.com/api/v1/get_all_item_prices",
-//     qs: {
-//       api_key: apiKey,
-//       code: code,
-//       app_id: "730"
-//     }
-//   }
-
 generateCode();
-// setInterval(generateCode, 28000);
+setInterval(generateCode, 28000);
 
 Promise.all(promises)
 
@@ -116,7 +97,7 @@ Promise.all(promises)
       let itemName, assetid;
       let prices = [];
       let itemids = [];
-      for (let i = 0; i < 1; i++) {
+      for (let i = 0; i < 120; i++) {
         [itemName, assetid] = [inventory[i][0], inventory[i][1]];
         prices.push(pricelist[itemName]);
         itemids.push(assetid);
@@ -133,33 +114,46 @@ Promise.all(promises)
         }
       }, function(error, response, body) {
           response = JSON.parse(response.body);
-          let botid = response["data"]["bot_info"]["uid"];
+          try {
+            let botid = response["data"]["bot_info"]["uid"];
+          } catch (err) {
+            console.log(err + '\n');
+            console.log(response);
+            process.exit();
+          }
           let token = response["data"]["trade_tokens"][0];
-          setTimeout(() => {
-            manager.getOffers(null, null, function(err, sent, received) {
-              if (err) throw new Error(err);
-              resolve({"botid": botid, "token": token, "offers": received});
-          });
-        }, 3000);
+          resolve({"botid": botid, "token": token});
       });
     })
   })
 
   .then(results => {
-    console.log(results.token);
-    let match;
-    let regexp = new RegExp(`BitSkins Trade Token: (${results.token}),.+`, "i");
-    for (let offer of results.offers) {
-      match = offer.message.match(regexp);
-      console.log(match)
-      if (match) {
-        acceptOffer(offer.id, results.botid, function(err, body) {
-          console.log(body);
-          process.exit();
+    manager.on('newOffer', function(offer) {
+      let regexp = new RegExp(`BitSkins Trade Token: (${results.token}),.+`, "i");
+    	console.log("New offer #" + offer.id + " from " + offer.partner.getSteam3RenderedID());
+      if (offer.message.match(regexp)) {
+        offer.accept(function(err, status) {
+          if (err) {
+            console.log("Unable to accept offer: " + err.message);
+          } else {
+            console.log("Offer accepted: " + status);
+            if (status == "pending") {
+              community.acceptConfirmationForObject("Y6uDbFkE92y9rcYBRLqNK9+2ax0=", offer.id, function(err) {
+                if (err) {
+                  console.log("Can't confirm trade offer: " + err.message);
+                } else {
+                  console.log("Trade offer " + offer.id + " confirmed");
+                }
+                process.exit();
+              });
+            }
+          }
         });
-        break;
       }
-    }
+    });
   })
 
-  .catch(error => console.log(error))
+  .catch(error => {
+    console.log(error)
+    process.exit();
+  })
