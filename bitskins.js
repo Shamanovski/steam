@@ -1,5 +1,3 @@
-//TODO: fix events
-
 const fs = require('fs');
 const EventEmitter = require('events');
 
@@ -13,8 +11,8 @@ var totp = require('notp').totp;
 var base32 = require('thirty-two');
 var request = require('request');
 let manager = new TradeOfferManager();
-let apiKey = "74315789-5f2a-4d84-8a47-cd362ee51c8b";
-let secret = "BHZIQUFOTQVX7BLK";
+const apiKey = "74315789-5f2a-4d84-8a47-cd362ee51c8b";
+const secret = "BHZIQUFOTQVX7BLK";
 let code;
 let pricelist = {
   "Twitch Prime Balaclava": "",
@@ -49,7 +47,7 @@ function listItems(itemsids, prices) {
           process.exit();
         }
         let token = response["data"]["trade_tokens"][0];
-        resolve({"botid": botid, "token": token});
+        bitskinsOffers.push(token);
     });
   })
 }
@@ -86,6 +84,42 @@ let promises = [
   })
 ];
 
+let bitskinsOffers = [];
+
+manager.on('newOffer', function(offer) {
+  console.log("New offer #" + offer.id + " from " + offer.partner.getSteam3RenderedID());
+  let tokenIndex = bitskinsOffers.findIndex(function(element) {
+    let regexp = new RegExp(`BitSkins Trade Token: (${element}),.+`, "i");
+    return !!offer.message.match(regexp);
+  });
+
+  if (!~tokenIndex) {
+    return;
+  }
+
+  bitskinsOffers.splice(tokenIndex, 1);
+  offer.accept(function(err, status) {
+    if (err) {
+      console.log("Unable to accept offer: " + err.message);
+    } else {
+      console.log("Offer accepted: " + status);
+      if (status == "pending") {
+        community.acceptConfirmationForObject("Y6uDbFkE92y9rcYBRLqNK9+2ax0=",
+          offer.id, function(err) {
+            if (err) {
+              console.log("Can't confirm trade offer: " + err.message);
+            } else {
+              console.log("Trade offer " + offer.id + " confirmed");
+            }
+            if (!bitskinsOffers.length) {
+              process.exit();
+            }
+          });
+      }
+    }
+  });
+});
+
 generateCode();
 setInterval(generateCode, 28000);
 
@@ -93,64 +127,16 @@ Promise.all(promises)
 
   .then(results => {
     let inventory = results[0];
-    return new Promise((resolve, reject) => {
-      let itemName, assetid;
-      let prices = [];
-      let itemids = [];
-      for (let i = 0; i < 120; i++) {
-        [itemName, assetid] = [inventory[i][0], inventory[i][1]];
-        prices.push(pricelist[itemName]);
-        itemids.push(assetid);
-      }
+    let itemName, assetid;
+    let prices = [];
+    let itemids = [];
+    for (let i = 0; i < 120; i++) {
+      [itemName, assetid] = [inventory[i][0], inventory[i][1]];
+      prices.push(pricelist[itemName]);
+      itemids.push(assetid);
       [itemids, prices] = [itemids.join(","), prices.join(",")];
-      request({
-        uri: "https://bitskins.com/api/v1/list_item_for_sale",
-        qs: {
-          api_key: apiKey,
-          code: code,
-          item_ids: itemids,
-          prices: prices,
-          app_id: "730"
-        }
-      }, function(error, response, body) {
-          response = JSON.parse(response.body);
-          try {
-            let botid = response["data"]["bot_info"]["uid"];
-          } catch (err) {
-            console.log(err + '\n');
-            console.log(response);
-            process.exit();
-          }
-          let token = response["data"]["trade_tokens"][0];
-          resolve({"botid": botid, "token": token});
-      });
-    })
-  })
-
-  .then(results => {
-    manager.on('newOffer', function(offer) {
-      let regexp = new RegExp(`BitSkins Trade Token: (${results.token}),.+`, "i");
-    	console.log("New offer #" + offer.id + " from " + offer.partner.getSteam3RenderedID());
-      if (offer.message.match(regexp)) {
-        offer.accept(function(err, status) {
-          if (err) {
-            console.log("Unable to accept offer: " + err.message);
-          } else {
-            console.log("Offer accepted: " + status);
-            if (status == "pending") {
-              community.acceptConfirmationForObject("Y6uDbFkE92y9rcYBRLqNK9+2ax0=", offer.id, function(err) {
-                if (err) {
-                  console.log("Can't confirm trade offer: " + err.message);
-                } else {
-                  console.log("Trade offer " + offer.id + " confirmed");
-                }
-                process.exit();
-              });
-            }
-          }
-        });
-      }
-    });
+      listItems(itemids, prices);
+    }
   })
 
   .catch(error => {
