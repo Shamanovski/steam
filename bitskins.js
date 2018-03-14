@@ -16,7 +16,7 @@ const secret = "BHZIQUFOTQVX7BLK";
 let code;
 let pricelist = {
   "Twitch Prime Balaclava": "",
-  "Mann Co. Supply Crate Key": "",
+  "Mann Co. Supply Crate Key": 2.09,
   "Gamma 2 Case Key": 2.05
 };
 
@@ -25,36 +25,33 @@ function generateCode() {
   code = totp.gen(base32.decode(secret));
 }
 
-function listItems(itemsids, prices) {
-
-  return new Promise((resolve, reject) => {
-    request({
-      uri: "https://bitskins.com/api/v1/list_item_for_sale",
-      qs: {
-        api_key: apiKey,
-        code: code,
-        item_ids: itemids,
-        prices: prices,
-        app_id: "730"
+function listItems(itemids, prices) {
+  request({
+    uri: "https://bitskins.com/api/v1/list_item_for_sale",
+    qs: {
+      api_key: apiKey,
+      code: code,
+      item_ids: itemids,
+      prices: prices,
+      app_id: "440"
+    }
+  }, function(error, response, body) {
+      response = JSON.parse(response.body);
+      try {
+        let botid = response["data"]["bot_info"]["uid"];
+      } catch (err) {
+        console.log(err + '\n');
+        console.log(response);
+        process.exit();
       }
-    }, function(error, response, body) {
-        response = JSON.parse(response.body);
-        try {
-          let botid = response["data"]["bot_info"]["uid"];
-        } catch (err) {
-          console.log(err + '\n');
-          console.log(response);
-          process.exit();
-        }
-        let token = response["data"]["trade_tokens"][0];
-        bitskinsOffers.push(token);
-    });
-  })
+      let token = response["data"]["trade_tokens"][0];
+      bitskinsOffers.push(token);
+  });
 }
 
 let promises = [
   new Promise((resolve, reject) => {
-    community.getUserInventoryContents("76561198177211015", "730", "2", true, "english", (err, inventory) => {
+    community.getUserInventoryContents("76561198177211015", "440", "2", true, "english", (err, inventory) => {
     let item;
     let result = [];
     for (let i = 0; i < inventory.length; i++) {
@@ -62,10 +59,10 @@ let promises = [
       if (item.tradable) {
         result.push([item.market_hash_name, item.assetid]);
         resolve(result);
-        }
       }
-    })
-  }),
+    }
+  })
+}),
 
   new Promise((resolve, reject) => {
     fs.readFile("common/database/ops_bot.maFile", (err, data) => {
@@ -111,10 +108,11 @@ manager.on('newOffer', function(offer) {
             } else {
               console.log("Trade offer " + offer.id + " confirmed");
             }
+            console.log("offers left: " + bitskinsOffers.length);
             if (!bitskinsOffers.length) {
               process.exit();
             }
-          });
+        });
       }
     }
   });
@@ -130,12 +128,22 @@ Promise.all(promises)
     let itemName, assetid;
     let prices = [];
     let itemids = [];
-    for (let i = 0; i < 120; i++) {
+    for (let i = 0; i < 100; i++) {
       [itemName, assetid] = [inventory[i][0], inventory[i][1]];
+
+      if (!pricelist[itemName]) {
+        continue;
+      }
       prices.push(pricelist[itemName]);
       itemids.push(assetid);
-      [itemids, prices] = [itemids.join(","), prices.join(",")];
-      listItems(itemids, prices);
+
+      if (i > 0 && i % 99 == 0 || i == inventory.length - 1) {
+        console.log("listing items: " + i);
+        console.log(itemids.length, prices.length);
+        listItems(itemids.join(","), prices.join(","));
+        prices = [];
+        itemids = [];
+      }
     }
   })
 
