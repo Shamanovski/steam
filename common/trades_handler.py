@@ -28,10 +28,11 @@ def uncaught_exceptions_handler(type, value, tb):
     logger.critical("\n{0}: {1}\n{2}".format(type, value, ''.join(traceback.format_tb(tb))))
     sys.exit(1)
 
+
 sys.excepthook = uncaught_exceptions_handler
 
 
-def sell_on_market(steam_client, game_option):
+async def sell_on_market(steam_client, game_option):
     def confirm_items():
         logger.info('Confirming market transactions...')
         steam_client.confirm_transactions()
@@ -64,6 +65,8 @@ def sell_on_market(steam_client, game_option):
         resp = steam_client.create_market_listing(int(skin_id), listing_price, appid, context_id)
         if 'You have too many listings pending confirmation' in resp.get('message', ''):
             confirm_items()
+        elif 'exceed the maximum wallet balance' in resp.get('message', ''):
+            await purchase_skins(steam_client)
 
     confirm_items()
     logger.info('Finished putting items on sale on the market')
@@ -122,7 +125,7 @@ def fetch_nameid(steam_client, game_option, market_name):
     nameid_pattern = re.compile('Market_LoadOrderSpread\( ((\d)+) \)')
     nameid = None
     r = steam_client.session.get('http://steamcommunity.com/market/listings/{}/{}'.format(
-        game_option.value[0], market_name.replace('?', '%3F')), timeout=10)
+            game_option.value[0], market_name.replace('?', '%3F')), timeout=10)
     try:
         nameid = nameid_pattern.search(r.text).group(1)
     except AttributeError as err:
@@ -194,6 +197,7 @@ def sell_on_opskins(steam_client, ops, game_option):
     start = 0
     end = limit = ops.get_listing_limit()
     tradeoffers = []
+
     while True:
         resp = ops.list_items(items[start:end])
         if resp['tradeoffer_error']:
@@ -279,7 +283,7 @@ async def purchase_skins(steam_client):
             if amount_to_buy > quantity:
                 amount_to_buy = quantity
 
-            data["price_total"] = skin_price * 100 * amount_to_buy
+            data["price_total"] = int(skin_price * 100 * amount_to_buy)
             data["quantity"] = amount_to_buy
             response = steam_client.session.post("https://steamcommunity.com/market/createbuyorder/", data=data,
                                                  headers=headers).json()
@@ -287,23 +291,34 @@ async def purchase_skins(steam_client):
                 success = response['success']
             except TypeError:
                 logger.error('createbuyorder error: %s', response)
-                await asyncio.sleep(300)
+                await asyncio.sleep(30)
                 continue
             if success != 1:
-                if ('You already have an active buy order' in response.get('message', '')
-                        or 'The listing may have been removed' in response.get('message', '')
-                        or 'servers are currently too busy' in response.get('message', '')
-                        or 'You cannot buy any items until' in response.get('message', '')):
-                    logger.error(response)
-                    time.sleep(15)
-                    continue
+                logger.error(response)
+                if 'You already have an active buy order' in response.get('message', ''):
+                    await cancel_order(response['buy_orderid'])
                 else:
-                    raise Exception(response)
+                    await asyncio.sleep(300)
+
+                continue
+
             logger.info('Item bought. Name: %s, Price: %s, Quantity: %s', skin_name, skin_price, amount_to_buy)
             break
 
         wallet_balance -= skin_price * amount_to_buy
         time.sleep(5)  # wait until the order is fully complete
+
+
+async def cancel_order(steam_client, orderid):
+    success = 0
+    while not success:
+        resp = steam_client.session.post("http://steamcommunity.com/market/cancelbuyorder/",
+                                         data={'sessionid': steam_client.get_session_id(), 'buy_orderid': orderid})
+        success = resp['success']
+        if success:
+            return
+
+        await asyncio.sleep(300)
 
 
 def deliver_items(steam_client, token='GzpZvCSv', steamid='76561198177211015'):
