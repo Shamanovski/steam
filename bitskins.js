@@ -137,7 +137,7 @@ Promise.all(promises)
       prices.push(pricelist[itemName]);
       itemids.push(assetid);
 
-      if (i > 0 && i % 99 == 0 || i == inventory.length - 1) {
+      if (i % 99 == 0 || i == inventory.length - 1) {
         console.log("listing items: " + i);
         console.log(itemids.length, prices.length);
         listItems(itemids.join(","), prices.join(","));
